@@ -111,6 +111,22 @@ function asText(value: unknown): string {
   return String(value);
 }
 
+function readInviteCodeFromUrl(): string {
+  if (typeof window === 'undefined') return '';
+
+  const searchInvite = new URLSearchParams(window.location.search || '').get('invite');
+  if (searchInvite && searchInvite.trim()) return searchInvite.trim();
+
+  const rawHash = String(window.location.hash || '');
+  const queryIndex = rawHash.indexOf('?');
+  if (queryIndex >= 0) {
+    const hashInvite = new URLSearchParams(rawHash.slice(queryIndex + 1)).get('invite');
+    if (hashInvite && hashInvite.trim()) return hashInvite.trim();
+  }
+
+  return '';
+}
+
 function summarizeImportResult(
   ciphers: Array<Record<string, unknown>>,
   folderCount: number,
@@ -302,6 +318,7 @@ export default function App() {
     password2: '',
     inviteCode: '',
   });
+  const [inviteCodeFromUrl, setInviteCodeFromUrl] = useState('');
   const [unlockPassword, setUnlockPassword] = useState('');
   const [pendingTotp, setPendingTotp] = useState<PendingTotp | null>(null);
   const [totpCode, setTotpCode] = useState('');
@@ -325,6 +342,35 @@ export default function App() {
   const [decryptedCiphers, setDecryptedCiphers] = useState<Cipher[]>([]);
   const [decryptedSends, setDecryptedSends] = useState<Send[]>([]);
   const migratedPlainFolderIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const syncInviteFromUrl = () => {
+      setInviteCodeFromUrl(readInviteCodeFromUrl());
+    };
+    syncInviteFromUrl();
+    window.addEventListener('hashchange', syncInviteFromUrl);
+    window.addEventListener('popstate', syncInviteFromUrl);
+    return () => {
+      window.removeEventListener('hashchange', syncInviteFromUrl);
+      window.removeEventListener('popstate', syncInviteFromUrl);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!inviteCodeFromUrl) return;
+    setRegisterValues((prev) => (prev.inviteCode === inviteCodeFromUrl ? prev : { ...prev, inviteCode: inviteCodeFromUrl }));
+  }, [inviteCodeFromUrl]);
+
+  useEffect(() => {
+    if (!inviteCodeFromUrl) return;
+    if (phase === 'loading' || phase === 'locked' || phase === 'app') return;
+    setPhase('register');
+    if (location !== '/register') navigate('/register');
+    if (typeof window !== 'undefined' && typeof window.history?.replaceState === 'function') {
+      window.history.replaceState(null, '', '/register');
+    }
+    setInviteCodeFromUrl('');
+  }, [inviteCodeFromUrl, phase, location, navigate]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -539,6 +585,7 @@ export default function App() {
     }
     setLoginValues({ email: registerValues.email.toLowerCase(), password: '' });
     setPhase('login');
+    navigate('/login');
     pushToast('success', t('txt_registration_succeeded_please_sign_in'));
   }
 
@@ -577,7 +624,7 @@ export default function App() {
     setProfile(null);
     setPendingTotp(null);
     setPhase(setupRegistered ? 'login' : 'register');
-    navigate('/login');
+    navigate(setupRegistered ? '/login' : '/register');
   }
 
   function handleLogout() {
@@ -1695,8 +1742,17 @@ export default function App() {
           onSubmitLogin={() => void handleLogin()}
           onSubmitRegister={() => void handleRegister()}
           onSubmitUnlock={() => void handleUnlock()}
-          onGotoLogin={() => setPhase('login')}
-          onGotoRegister={() => setPhase('register')}
+          onGotoLogin={() => {
+            setPhase('login');
+            navigate('/login');
+          }}
+          onGotoRegister={() => {
+            if (inviteCodeFromUrl) {
+              setRegisterValues((prev) => ({ ...prev, inviteCode: inviteCodeFromUrl }));
+            }
+            setPhase('register');
+            navigate('/register');
+          }}
           onLogout={logoutNow}
         />
         <ToastHost toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
